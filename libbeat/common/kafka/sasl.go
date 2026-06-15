@@ -25,7 +25,9 @@ import (
 )
 
 type SaslConfig struct {
-	SaslMechanism string `config:"mechanism"`
+	SaslMechanism   string            `config:"mechanism"`
+	CredentialsPath string            `config:"credentials_path"`
+	Extensions      map[string]string `config:"extensions"`
 }
 
 const (
@@ -54,11 +56,11 @@ func (c *SaslConfig) ValidateWithUsernameAndPassword(usernameAndPassword bool) e
 	return nil
 }
 
-func (c *SaslConfig) ConfigureSarama(config *sarama.Config) {
+func (c *SaslConfig) ConfigureSarama(config *sarama.Config) error {
 	switch strings.ToUpper(c.SaslMechanism) { // try not to force users to use all upper case
 	case "":
 		// SASL is not enabled
-		return
+		return nil
 	case saslTypePlaintext:
 		config.Net.SASL.Mechanism = sarama.SASLMechanism(sarama.SASLTypePlaintext)
 	case saslTypeSCRAMSHA256:
@@ -69,6 +71,14 @@ func (c *SaslConfig) ConfigureSarama(config *sarama.Config) {
 		config.Net.SASL.Handshake = true
 		config.Net.SASL.Mechanism = sarama.SASLMechanism(sarama.SASLTypeSCRAMSHA512)
 		config.Net.SASL.SCRAMClientGeneratorFunc = scramClient(saslTypeSCRAMSHA512)
+	case saslTypeOauthBearer:
+		provider, err := newFileTokenProvider(c.CredentialsPath, c.Extensions)
+		if err != nil {
+			return err
+		}
+		config.Net.SASL.Mechanism = sarama.SASLMechanism(sarama.SASLTypeOAuth)
+		config.Net.SASL.TokenProvider = provider
 	default:
 	}
+	return nil
 }
