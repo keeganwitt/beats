@@ -27,8 +27,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/elastic/beats/v7/libbeat/common/kafka"
 	"github.com/elastic/elastic-agent-libs/logp"
 	"github.com/elastic/elastic-agent-libs/monitoring"
+	"github.com/elastic/sarama"
 )
 
 func TestValidateCredentials(t *testing.T) {
@@ -219,4 +221,42 @@ func TestAttachSaramaMetricsIsolatedPerParent(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestNewSaramaConfigOAUTHBEARER(t *testing.T) {
+	logger := logp.NewNopLogger()
+
+	baseConfig := func() kafkaInputConfig {
+		cfg := defaultConfig()
+		cfg.Hosts = []string{"localhost:9092"}
+		cfg.Topics = []string{"foo"}
+		cfg.GroupID = "filebeat"
+		return cfg
+	}
+
+	t.Run("valid config enables SASL and sets a token provider", func(t *testing.T) {
+		cfg := baseConfig()
+		cfg.Sasl = kafka.SaslConfig{
+			SaslMechanism:   "OAUTHBEARER",
+			CredentialsPath: "/var/run/secrets/tokens/kafka.jwt",
+			Extensions: map[string]string{
+				"logicalCluster": "lkc-abc123",
+				"identityPoolId": "pool-xyz789",
+			},
+		}
+
+		sc, err := newSaramaConfig(cfg, logger)
+		require.NoError(t, err)
+		assert.True(t, sc.Net.SASL.Enable, "SASL should be enabled")
+		assert.Equal(t, sarama.SASLMechanism(sarama.SASLTypeOAuth), sc.Net.SASL.Mechanism)
+		assert.NotNil(t, sc.Net.SASL.TokenProvider, "token provider should be set for OAUTHBEARER")
+	})
+
+	t.Run("missing credentials_path is an error", func(t *testing.T) {
+		cfg := baseConfig()
+		cfg.Sasl = kafka.SaslConfig{SaslMechanism: "OAUTHBEARER"}
+
+		_, err := newSaramaConfig(cfg, logger)
+		require.Error(t, err, "expected an error when sasl.credentials_path is not set for OAUTHBEARER")
+	})
 }
