@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/elastic/beats/v7/libbeat/common/kafka"
-	"github.com/elastic/elastic-agent-libs/logp"
+	"github.com/elastic/elastic-agent-libs/logp/logptest"
 	"github.com/elastic/elastic-agent-libs/monitoring"
 	"github.com/elastic/sarama"
 )
@@ -75,7 +75,7 @@ func TestValidateCredentials(t *testing.T) {
 // consumer-group and network timeouts onto sarama's own defaults, so that
 // existing configurations are unaffected by these options being added.
 func TestNewSaramaConfigDefaults(t *testing.T) {
-	saramaConfig, err := newSaramaConfig(defaultConfig(), logp.NewNopLogger())
+	saramaConfig, err := newSaramaConfig(defaultConfig(), logptest.NewTestingLogger(t, ""))
 	require.NoError(t, err, "default config should produce a valid sarama config")
 	assert.Nil(t, monitoring.Default.Get("filebeat.inputs.kafka"),
 		"config construction must not register Sarama metrics on monitoring.Default")
@@ -102,7 +102,7 @@ func TestNewSaramaConfigTimeoutOverrides(t *testing.T) {
 	config.Timeout = 60 * time.Second
 	config.KeepAlive = 15 * time.Second
 
-	saramaConfig, err := newSaramaConfig(config, logp.NewNopLogger())
+	saramaConfig, err := newSaramaConfig(config, logptest.NewTestingLogger(t, ""))
 	require.NoError(t, err)
 
 	assert.Equal(t, 30*time.Second, saramaConfig.Consumer.Group.Session.Timeout)
@@ -121,7 +121,7 @@ func TestNewSaramaConfigGroupInstanceID(t *testing.T) {
 	config.Version = "2.3.0"
 	config.GroupInstanceID = "filebeat-pod-1"
 
-	saramaConfig, err := newSaramaConfig(config, logp.NewNopLogger())
+	saramaConfig, err := newSaramaConfig(config, logptest.NewTestingLogger(t, ""))
 	require.NoError(t, err)
 
 	assert.Equal(t, "filebeat-pod-1", saramaConfig.Consumer.Group.InstanceId,
@@ -136,7 +136,7 @@ func TestNewSaramaConfigGroupInstanceIDRequiresVersion(t *testing.T) {
 	config := defaultConfig() // Version defaults to 2.1.0
 	config.GroupInstanceID = "filebeat-pod-1"
 
-	_, err := newSaramaConfig(config, logp.NewNopLogger())
+	_, err := newSaramaConfig(config, logptest.NewTestingLogger(t, ""))
 	require.Error(t, err, "group_instance_id below version 2.3.0 must be rejected")
 	assert.ErrorContains(t, err, "group_instance_id requires 'version' >= 2.3.0",
 		"error must carry the stable, searchable message naming the option and required version")
@@ -160,7 +160,7 @@ func TestNewSaramaConfigGroupInstanceIDInvalid(t *testing.T) {
 			config.Version = "2.3.0"
 			config.GroupInstanceID = id
 
-			_, err := newSaramaConfig(config, logp.NewNopLogger())
+			_, err := newSaramaConfig(config, logptest.NewTestingLogger(t, ""))
 			assert.Error(t, err,
 				"invalid group_instance_id %q must be rejected", id)
 		})
@@ -169,10 +169,10 @@ func TestNewSaramaConfigGroupInstanceIDInvalid(t *testing.T) {
 
 func TestAttachSaramaMetricsUsesParentRegistry(t *testing.T) {
 	parent := monitoring.NewRegistry()
-	cfg, err := newSaramaConfig(defaultConfig(), logp.NewNopLogger())
+	cfg, err := newSaramaConfig(defaultConfig(), logptest.NewTestingLogger(t, ""))
 	require.NoError(t, err, "default config should produce a valid sarama config")
 
-	attachSaramaMetrics(cfg, parent, logp.NewNopLogger())
+	attachSaramaMetrics(cfg, parent, logptest.NewTestingLogger(t, ""))
 	require.NotNil(t, cfg.MetricRegistry, "Sarama should have a metric registry after attach")
 
 	metrics.GetOrRegisterMeter("incoming-byte-rate", cfg.MetricRegistry)
@@ -185,10 +185,10 @@ func TestAttachSaramaMetricsUsesParentRegistry(t *testing.T) {
 }
 
 func TestAttachSaramaMetricsNilParentDoesNotUseDefault(t *testing.T) {
-	cfg, err := newSaramaConfig(defaultConfig(), logp.NewNopLogger())
+	cfg, err := newSaramaConfig(defaultConfig(), logptest.NewTestingLogger(t, ""))
 	require.NoError(t, err, "default config should produce a valid sarama config")
 
-	attachSaramaMetrics(cfg, nil, logp.NewNopLogger())
+	attachSaramaMetrics(cfg, nil, logptest.NewTestingLogger(t, ""))
 	require.NotNil(t, cfg.MetricRegistry, "nil parent should still get a private registry")
 
 	metrics.GetOrRegisterMeter("incoming-byte-rate", cfg.MetricRegistry)
@@ -206,12 +206,12 @@ func TestAttachSaramaMetricsIsolatedPerParent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			parent := monitoring.NewRegistry()
-			cfg, err := newSaramaConfig(defaultConfig(), logp.NewNopLogger())
+			cfg, err := newSaramaConfig(defaultConfig(), logptest.NewTestingLogger(t, ""))
 			assert.NoError(t, err, "default config should produce a valid sarama config")
 			if err != nil {
 				return
 			}
-			attachSaramaMetrics(cfg, parent, logp.NewNopLogger())
+			attachSaramaMetrics(cfg, parent, logptest.NewTestingLogger(t, ""))
 			metrics.GetOrRegisterMeter("incoming-byte-rate", cfg.MetricRegistry)
 			metrics.GetOrRegisterMeter("outgoing-byte-rate", cfg.MetricRegistry)
 			assert.NotNil(t, parent.Get("kafka.bytes_read"),
@@ -224,7 +224,7 @@ func TestAttachSaramaMetricsIsolatedPerParent(t *testing.T) {
 }
 
 func TestNewSaramaConfigOAUTHBEARER(t *testing.T) {
-	logger := logp.NewNopLogger()
+	logger := logptest.NewTestingLogger(t, "")
 
 	baseConfig := func() kafkaInputConfig {
 		cfg := defaultConfig()
